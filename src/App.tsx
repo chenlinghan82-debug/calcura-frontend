@@ -199,8 +199,13 @@ function App() {
   const searchSerial = useRef(0)
   const saveQueue = useRef(Promise.resolve())
   const expressionRef = useRef('')
+  const liveRef = useRef<{ expression: string; result: number; steps: string[] } | null>(null)
+  const [live, setLive] = useState<{ expression: string; result: number; steps: string[] } | null>(null)
 
-  const displayValue = result !== null && justCalculated ? formatResult(result) : expression || '0'
+  const trimmedExpression = expression.trim()
+  const previewReady = !justCalculated && live !== null && live.expression === trimmedExpression
+  const shownNumber = result !== null && justCalculated ? result : previewReady ? live.result : null
+  const displayValue = shownNumber !== null ? formatResult(shownNumber) : expression || '0'
   expressionRef.current = expression
   const prettyExpression = expression ? expressionForDisplay(expression) : 'Ready for a calculation'
   const isOnline = backendStatus === 'online'
@@ -261,10 +266,26 @@ function App() {
   useEffect(() => {
     const value = expression.trim()
     if (!value || justCalculated) return
+    let active = true
+    if (liveRef.current?.expression !== value) {
+      liveRef.current = null
+      setLive(null)
+      setSteps([])
+    }
     const timer = window.setTimeout(() => {
-      void preview(value).catch(() => undefined)
-    }, 40)
-    return () => window.clearTimeout(timer)
+      void preview(value).then((response) => {
+        if (!active || expressionRef.current.trim() !== value) return
+        const next = { expression: value, result: response.result, steps: response.steps ?? [] }
+        liveRef.current = next
+        setLive(next)
+        setSteps(next.steps)
+        setBackendStatus('online')
+      }).catch(() => undefined)
+    }, 30)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
   }, [expression, justCalculated])
 
   useEffect(() => {
@@ -331,45 +352,7 @@ function App() {
     setCopied(false)
   }
 
-  async function submit() {
-    const value = expressionRef.current.trim()
-    if (!value) return
-    const serial = requestSerial.current + 1
-    requestSerial.current = serial
-    setError('')
-    setCopied(false)
-    setNotice('')
-    const slowTimer = window.setTimeout(() => {
-      if (requestSerial.current === serial) setIsLoading(true)
-    }, 160)
-    let previewOk = false
-    let waitingForFallback = false
-    try {
-      const response = await preview(value)
-      if (serial !== requestSerial.current || expressionRef.current.trim() !== value) return
-      setResult(response.result)
-      setSteps(response.steps ?? [])
-      setJustCalculated(true)
-      setBackendStatus('online')
-      setNotice('Result returned by the backend. Saving history...')
-      previewOk = true
-    } catch (requestError) {
-      if (serial !== requestSerial.current || expressionRef.current.trim() !== value) return
-      if (isNetworkError(requestError)) {
-        waitingForFallback = true
-        setIsLoading(true)
-      } else {
-        setError(requestError instanceof Error ? friendlyError(requestError.message) : 'The calculation could not be completed.')
-        setResult(null)
-        setSteps([])
-        setBackendStatus((current) => current === 'checking' ? 'offline' : current)
-      }
-    } finally {
-      window.clearTimeout(slowTimer)
-      if (serial === requestSerial.current && !waitingForFallback) setIsLoading(false)
-    }
-    if (!previewOk && !waitingForFallback) return
-
+  function queueSave(value: string, serial: number, previewOk: boolean) {
     saveQueue.current = saveQueue.current.then(async () => {
       try {
         const saved = await calculate(value)
@@ -402,6 +385,58 @@ function App() {
         }
       }
     })
+  }
+
+  async function submit() {
+    const value = expressionRef.current.trim()
+    if (!value) return
+    const serial = requestSerial.current + 1
+    requestSerial.current = serial
+    setError('')
+    setCopied(false)
+    setNotice('')
+    const ready = liveRef.current
+    if (ready && ready.expression === value) {
+      setResult(ready.result)
+      setSteps(ready.steps)
+      setJustCalculated(true)
+      setBackendStatus('online')
+      setNotice('Result returned by the backend. Saving history...')
+      setIsLoading(false)
+      queueSave(value, serial, true)
+      return
+    }
+    const slowTimer = window.setTimeout(() => {
+      if (requestSerial.current === serial) setIsLoading(true)
+    }, 160)
+    let previewOk = false
+    let waitingForFallback = false
+    try {
+      const response = await preview(value)
+      if (serial !== requestSerial.current || expressionRef.current.trim() !== value) return
+      setResult(response.result)
+      setSteps(response.steps ?? [])
+      setJustCalculated(true)
+      setBackendStatus('online')
+      setNotice('Result returned by the backend. Saving history...')
+      previewOk = true
+    } catch (requestError) {
+      if (serial !== requestSerial.current || expressionRef.current.trim() !== value) return
+      if (isNetworkError(requestError)) {
+        waitingForFallback = true
+        setIsLoading(true)
+      } else {
+        setError(requestError instanceof Error ? friendlyError(requestError.message) : 'The calculation could not be completed.')
+        setResult(null)
+        setSteps([])
+        setBackendStatus((current) => current === 'checking' ? 'offline' : current)
+      }
+    } finally {
+      window.clearTimeout(slowTimer)
+      if (serial === requestSerial.current && !waitingForFallback) setIsLoading(false)
+    }
+    if (!previewOk && !waitingForFallback) return
+    queueSave(value, serial, previewOk)
   }
 
   function handleButton(value: string) {
@@ -508,9 +543,9 @@ function App() {
   }
 
   async function copyResult() {
-    if (result === null) return
+    if (shownNumber === null) return
     try {
-      await copyText(plainNumber(result))
+      await copyText(plainNumber(shownNumber))
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1600)
     } catch {
@@ -582,8 +617,8 @@ function App() {
             <div className={error ? 'display-result error' : 'display-result'}>{error || displayValue}</div>
             {steps.length > 0 && <ol className="steps" aria-label="Backend calculation steps">{steps.map((step, index) => <li key={`${step}-${index}`}>{step}</li>)}</ol>}
             <div className="display-footer">
-              <span>{isLoading ? 'Calculating with the backend...' : notice ? notice : result !== null && justCalculated ? 'Result returned by the backend' : 'Enter an expression, then press Enter'}</span>
-              <button className="copy-button" onClick={() => void copyResult()} disabled={result === null} aria-label="Copy result" title={result === null ? 'Calculate a result first' : 'Copy result'}>{copied ? <Check size={14} /> : <Clipboard size={14} />} {copied ? 'Copied' : 'Copy result'}</button>
+              <span>{isLoading ? 'Calculating with the backend...' : notice ? notice : result !== null && justCalculated ? 'Result returned by the backend' : previewReady ? 'Backend preview is ready. Press equals to save it.' : 'Enter an expression, then press Enter'}</span>
+              <button className="copy-button" onClick={() => void copyResult()} disabled={shownNumber === null} aria-label="Copy result" title={shownNumber === null ? 'Calculate a result first' : 'Copy result'}>{copied ? <Check size={14} /> : <Clipboard size={14} />} {copied ? 'Copied' : 'Copy result'}</button>
             </div>
           </div>
 
