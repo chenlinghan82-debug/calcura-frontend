@@ -237,7 +237,7 @@ function App() {
       setUsingCache(true)
     })
     void refreshBackendStatus()
-    // Keep the Hong Kong API process and its HTTPS connection warm.
+    // Keep the API process and its HTTPS connection warm.
     // Preview does not write history. Without this, the first equals after
     // a pause waits several seconds for a cold start.
     const warm = () => {
@@ -257,6 +257,15 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light')
   }, [isDark])
+
+  useEffect(() => {
+    const value = expression.trim()
+    if (!value || justCalculated) return
+    const timer = window.setTimeout(() => {
+      void preview(value).catch(() => undefined)
+    }, 40)
+    return () => window.clearTimeout(timer)
+  }, [expression, justCalculated])
 
   useEffect(() => {
     const serial = searchSerial.current + 1

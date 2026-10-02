@@ -22,16 +22,35 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T
 }
 
+const previewCache = new Map<string, { at: number; promise: Promise<PreviewResponse> }>()
+const PREVIEW_FRESH_MS = 20000
+
 export function preview(expression: string) {
-  // The answer always comes from the Python API. A same-origin copy of the
-  // calculator made the page look instant only by calculating in the browser
-  // project, which the assignment does not allow, and its cold start took
-  // several seconds. text/plain avoids a CORS preflight.
-  return request<PreviewResponse>('/api/preview', {
+  // The answer always comes from the Python API. Reusing a response only
+  // happens after that exact expression was already answered by the backend.
+  // text/plain avoids a CORS preflight.
+  const key = expression.trim()
+  const now = Date.now()
+  const cached = previewCache.get(key)
+  if (cached && now - cached.at < PREVIEW_FRESH_MS) return cached.promise
+  const promise = request<PreviewResponse>('/api/preview', {
     method: 'POST',
-    body: JSON.stringify({ expression }),
+    body: JSON.stringify({ expression: key }),
     cache: 'no-store',
-  })
+  }).then(
+    (value) => value,
+    (error: unknown) => {
+      const current = previewCache.get(key)
+      if (current?.promise === promise) previewCache.delete(key)
+      throw error
+    },
+  )
+  previewCache.set(key, { at: now, promise })
+  if (previewCache.size > 30) {
+    const oldest = previewCache.keys().next().value
+    if (oldest !== undefined) previewCache.delete(oldest)
+  }
+  return promise
 }
 
 export function calculate(expression: string) {
