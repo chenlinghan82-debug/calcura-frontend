@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
-  ArrowDownLeft,
-  Calculator,
   Check,
   Clipboard,
   Clock3,
@@ -18,7 +16,7 @@ import {
   Wifi,
   X,
 } from 'lucide-react'
-import { API_BASE_URL, calculate, clearHistory, deleteHistory, downloadHistory, getHealth, getHistory, getStats, toggleFavorite } from './services/api'
+import { API_BASE_URL, calculate, clearHistory, deleteHistory, downloadHistory, getHealth, getHistory, getStats, preview, toggleFavorite } from './services/api'
 import type { CalculationRecord, StatsResponse } from './types/api'
 
 const buttons = [
@@ -61,6 +59,26 @@ const functions = [
 ] as const
 
 type BackendStatus = 'checking' | 'online' | 'offline'
+
+function Pebble({ className = 'pebble' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 120 148" aria-hidden="true">
+      <ellipse cx="78" cy="118" rx="16" ry="7" fill="#7ec8ff" stroke="#2b211c" strokeWidth="3" />
+      <path d="M62 108c8 10 22 14 34 8" fill="none" stroke="#2b211c" strokeWidth="3" strokeLinecap="round" />
+      <rect x="86" y="96" width="16" height="34" rx="4" transform="rotate(24 94 113)" fill="#ffc83d" stroke="#2b211c" strokeWidth="3" />
+      <polygon points="92,128 112,126 102,142" fill="#ff8d6a" stroke="#2b211c" strokeWidth="3" strokeLinejoin="round" />
+      <ellipse cx="58" cy="78" rx="40" ry="36" fill="#ffd8b8" stroke="#2b211c" strokeWidth="3" />
+      <ellipse cx="54" cy="42" rx="30" ry="14" fill="#ff6b4a" stroke="#2b211c" strokeWidth="3" />
+      <circle cx="80" cy="36" r="6" fill="#ffc83d" stroke="#2b211c" strokeWidth="3" />
+      <circle cx="46" cy="76" r="3.4" fill="#2b211c" />
+      <circle cx="68" cy="76" r="3.4" fill="#2b211c" />
+      <ellipse cx="38" cy="86" rx="6" ry="3.4" fill="#ff9b8d" />
+      <ellipse cx="78" cy="86" rx="6" ry="3.4" fill="#ff9b8d" />
+      <path d="M48 94c4 6 14 6 18 0" fill="none" stroke="#2b211c" strokeWidth="2.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 
 function friendlyError(message: string) {
   if (message.includes('Division by zero')) return 'Division by zero is not allowed.'
@@ -170,8 +188,13 @@ function App() {
   const [usingCache, setUsingCache] = useState(false)
   const [databaseName, setDatabaseName] = useState('checking')
   const [showConnection, setShowConnection] = useState(false)
+  const [notice, setNotice] = useState('')
+  const requestSerial = useRef(0)
+  const saveQueue = useRef(Promise.resolve())
+  const expressionRef = useRef('')
 
   const displayValue = result !== null && justCalculated ? formatResult(result) : expression || '0'
+  expressionRef.current = expression
   const prettyExpression = expression ? expressionForDisplay(expression) : 'Ready for a calculation'
   const isOnline = backendStatus === 'online'
 
@@ -276,28 +299,62 @@ function App() {
   }
 
   async function submit() {
-    const value = expression.trim()
-    if (!value || isLoading) return
+    const value = expressionRef.current.trim()
+    if (!value) return
+    const serial = requestSerial.current + 1
+    requestSerial.current = serial
     setIsLoading(true)
     setError('')
     setCopied(false)
+    setNotice('')
+    let previewOk = false
     try {
-      const response = await calculate(value)
-      const record = normalizeRecord(response.record)
+      const response = await preview(value)
+      if (serial !== requestSerial.current || expressionRef.current.trim() !== value) return
       setResult(response.result)
-      setSteps(response.steps ?? record.steps ?? [])
+      setSteps(response.steps ?? [])
       setJustCalculated(true)
       setBackendStatus('online')
-      setUsingCache(false)
-      await refreshData('')
+      setNotice('Result shown. Saving it to history...')
+      previewOk = true
     } catch (requestError) {
+      if (serial !== requestSerial.current || expressionRef.current.trim() !== value) return
       setError(requestError instanceof Error ? friendlyError(requestError.message) : 'The calculation could not be completed.')
       setResult(null)
       setSteps([])
       setBackendStatus((current) => current === 'checking' ? 'offline' : current)
     } finally {
-      setIsLoading(false)
+      if (serial === requestSerial.current) setIsLoading(false)
     }
+
+    saveQueue.current = saveQueue.current.then(async () => {
+      try {
+        const saved = await calculate(value)
+        if (serial !== requestSerial.current) return
+        const record = normalizeRecord(saved.record)
+        if (!previewOk && expressionRef.current.trim() === value) {
+          setResult(saved.result)
+          setSteps(saved.steps ?? record.steps ?? [])
+          setJustCalculated(true)
+          setError('')
+        }
+        setBackendStatus('online')
+        setUsingCache(false)
+        if (serial === requestSerial.current) setNotice('')
+        try {
+          await refreshData('')
+        } catch {
+          if (serial === requestSerial.current) setUsingCache(true)
+        }
+      } catch (requestError) {
+        if (serial !== requestSerial.current) return
+        if (previewOk) {
+          setNotice('Result shown. History could not be saved yet.')
+        } else if (expressionRef.current.trim() === value) {
+          setError(requestError instanceof Error ? friendlyError(requestError.message) : 'The calculation could not be completed.')
+        }
+      }
+    })
   }
 
   function handleButton(value: string) {
@@ -425,10 +482,10 @@ function App() {
     <div className={isDark ? 'app-shell dark' : 'app-shell'}>
       <header className="topbar">
         <div className="brand-lockup">
-          <div className="brand-mark"><Calculator size={21} strokeWidth={2.5} /></div>
+          <div className="brand-mark"><Pebble className="brand-pebble" /></div>
           <div>
             <div className="brand-name">Calcura</div>
-            <div className="brand-caption">SECURE CALCULATION STUDIO</div>
+            <div className="brand-caption">PEBBLE CRAYON STUDIO</div>
           </div>
         </div>
         <div className="topbar-actions">
@@ -446,10 +503,11 @@ function App() {
         <section className="calculator-card card-surface">
           <div className="section-kicker"><Sparkles size={14} /> BACKEND-FIRST CALCULATOR</div>
           <div className="calculator-heading">
-            <div>
-              <h1>Clear calculations, <span>reliable history.</span></h1>
-              <p>Expressions are safely parsed by the backend. Every successful result is saved in the database.</p>
+            <div className="title-row"><div>
+              <h1>Clear calculations, <span>in my own colors.</span></h1>
+              <p>The backend parses every expression and returns the answer first. History is saved in the background.</p>
             </div>
+            <div className="pebble-sticker"><Pebble className="heading-pebble" /><span>Pebble</span></div></div>
             <button type="button" className={isOnline ? 'api-badge online' : 'api-badge'} aria-expanded={showConnection} aria-controls="api-connection-panel" onClick={() => setShowConnection((open) => !open)}><Wifi size={15} /> API connection</button>
           </div>
 
@@ -457,11 +515,12 @@ function App() {
           {showConnection && (
             <section className="connection-panel" id="api-connection-panel">
               <div className="connection-title"><Wifi size={15} /> API connection</div>
-              <p>This panel shows the live link between this page and the calculation service. Arithmetic still happens only on the backend.</p>
+              <p>This panel shows the live link between this page and the calculation service. Arithmetic still happens only on the backend. A normal expression is answered before the database write.</p>
               <dl>
                 <div><dt>Status</dt><dd>{backendStatusLabel}</dd></div>
                 <div><dt>API address</dt><dd>{API_BASE_URL}</dd></div>
                 <div><dt>Health check</dt><dd>/api/health</dd></div>
+                <div><dt>Preview</dt><dd>POST /api/preview</dd></div>
                 <div><dt>Calculate</dt><dd>POST /api/calculate</dd></div>
                 <div><dt>History</dt><dd>GET /api/history</dd></div>
                 <div><dt>Database</dt><dd>{databaseName}</dd></div>
@@ -476,18 +535,18 @@ function App() {
             <div className={error ? 'display-result error' : 'display-result'}>{error || displayValue}</div>
             {steps.length > 0 && <ol className="steps" aria-label="Backend calculation steps">{steps.map((step, index) => <li key={`${step}-${index}`}>{step}</li>)}</ol>}
             <div className="display-footer">
-              <span>{isLoading ? 'Calculating with the backend...' : result !== null && justCalculated ? 'Result returned by the backend' : 'Enter an expression, then press Enter'}</span>
+              <span>{isLoading ? 'Calculating with the backend...' : notice ? notice : result !== null && justCalculated ? 'Result returned by the backend' : 'Enter an expression, then press Enter'}</span>
               <button className="copy-button" onClick={() => void copyResult()} disabled={result === null} aria-label="Copy result" title={result === null ? 'Calculate a result first' : 'Copy result'}>{copied ? <Check size={14} /> : <Clipboard size={14} />} {copied ? 'Copied' : 'Copy result'}</button>
             </div>
           </div>
 
           <div className="function-row" role="group" aria-label="Scientific functions">
-            {functions.map((button) => <button key={button.aria} className="key function" onClick={() => handleButton(button.value)} disabled={isLoading} aria-label={button.aria} title={button.aria}>{button.label}</button>)}
+            {functions.map((button) => <button key={button.aria} className="key function" onClick={() => handleButton(button.value)} aria-label={button.aria} title={button.aria}>{button.label}</button>)}
           </div>
           <div className="keypad" role="group" aria-label="Calculator keypad">
-            {buttons.map((button) => <button key={button.value} className={`key ${button.kind}`} onClick={() => handleButton(button.value)} disabled={isLoading} aria-label={button.aria}>{button.label}</button>)}
+            {buttons.map((button) => <button key={button.value} className={`key ${button.kind}`} onClick={() => handleButton(button.value)} aria-label={button.aria}>{button.label}</button>)}
           </div>
-          <div className="calculator-note"><Activity size={14} /> The backend performs the calculation; the frontend only displays the result.</div>
+          <div className="calculator-note"><Activity size={14} /> The backend performs the calculation. This page only displays it, then saves the history.</div>
         </section>
 
         <aside className="history-card card-surface">
@@ -516,7 +575,7 @@ function App() {
                 <button className={record.is_favorite ? 'favorite-button active' : 'favorite-button'} aria-label={record.is_favorite ? `Unfavorite ${record.expression}` : `Favorite ${record.expression}`} title={record.is_favorite ? 'Remove favorite' : 'Mark as favorite'} onClick={() => void markFavorite(record.id)}><Star size={15} /></button>
                 <button className="delete-button" aria-label={`Delete ${record.expression}`} title="Delete record" onClick={() => void removeRecord(record.id)}><X size={15} /></button>
               </div>
-            )) : <div className="empty-state"><ArrowDownLeft size={24} /><strong>{keyword ? 'No matching calculations' : 'No calculations yet'}</strong><span>{keyword ? 'Try another keyword from an expression.' : 'Complete your first calculation and it will appear here.'}</span></div>}
+            )) : <div className="empty-state"><Pebble className="empty-pebble" /><strong>{keyword ? 'No matching calculations' : 'No calculations yet'}</strong><span>{keyword ? 'Try another keyword from an expression.' : 'Complete your first calculation and it will appear here.'}</span></div>}
           </div>
           <div className="history-footer"><span><span className="live-dot" /> {usingCache ? 'Offline cache. Reconnect to load the database.' : 'Saved in the backend database'}</span><span>{history.length} {history.length === 1 ? 'result' : 'results'}</span></div>
         </aside>

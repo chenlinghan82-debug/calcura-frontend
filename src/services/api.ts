@@ -1,11 +1,18 @@
-import type { CalculateResponse, FavoriteResponse, HistoryResponse, StatsResponse } from '../types/api'
+import type { CalculateResponse, FavoriteResponse, HistoryResponse, PreviewResponse, StatsResponse } from '../types/api'
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '')
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? 'GET').toUpperCase()
+  const headers = new Headers(init?.headers ?? {})
+  // text/plain keeps the browser from making a CORS preflight. GET and DELETE
+  // must not send a JSON content type, or every read also waits on OPTIONS.
+  if (method === 'POST' && init?.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'text/plain;charset=UTF-8')
+  }
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     ...init,
+    headers,
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -13,6 +20,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(message)
   }
   return payload as T
+}
+
+export function preview(expression: string) {
+  return request<PreviewResponse>('/api/preview', {
+    method: 'POST',
+    body: JSON.stringify({ expression }),
+  })
 }
 
 export function calculate(expression: string) {

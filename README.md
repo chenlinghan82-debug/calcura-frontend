@@ -68,7 +68,8 @@ npm run preview
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/api/calculate` | 提交表达式 |
+| POST | `/api/preview` | 先取得后端结果，不保存历史 |
+| POST | `/api/calculate` | 后端再次计算并保存历史 |
 | GET | `/api/history` | 读取历史 |
 | GET | `/api/history/export` | 导出 CSV |
 | POST | `/api/history/{id}/favorite` | 切换收藏 |
@@ -77,4 +78,4 @@ npm run preview
 | GET | `/api/stats` | 统计摘要 |
 | GET | `/api/health` | 后端状态 |
 
-浏览器本地只保存主题，以及后端暂时不可达时的离线显示缓存。刷新页面后，历史记录仍以后端数据库为准。
+浏览器先调用 `/api/preview` 显示后端返回的结果，再在后台调用 `/api/calculate` 保存历史。浏览器不做核心计算，也不会把算好的结果交给后端存储。本地只保存主题，以及后端暂时不可达时的离线显示缓存。刷新页面后，历史记录仍以后端数据库为准。

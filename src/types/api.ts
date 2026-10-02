@@ -33,3 +33,11 @@ export interface FavoriteResponse {
   success: boolean
   record: CalculationRecord
 }
+
+export interface PreviewResponse {
+  success: boolean
+  expression: string
+  result: number
+  steps: string[]
+  saved: boolean
+}
