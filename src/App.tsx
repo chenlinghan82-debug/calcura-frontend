@@ -237,10 +237,21 @@ function App() {
       setUsingCache(true)
     })
     void refreshBackendStatus()
-    // Wake the same-origin preview route without saving a history record.
-    void preview('1+1').catch(() => undefined)
-    const timer = window.setInterval(() => void refreshBackendStatus(), 15000)
-    return () => window.clearInterval(timer)
+    // Keep the Hong Kong API process and its HTTPS connection warm.
+    // Preview does not write history. Without this, the first equals after
+    // a pause waits several seconds for a cold start.
+    const warm = () => {
+      if (document.visibilityState !== 'visible') return
+      void preview('1+1').catch(() => undefined)
+      void refreshBackendStatus()
+    }
+    warm()
+    const timer = window.setInterval(warm, 8000)
+    document.addEventListener('visibilitychange', warm)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', warm)
+    }
   }, [])
 
   useEffect(() => {

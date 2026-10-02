@@ -22,36 +22,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T
 }
 
-async function parseJson<T>(response: Response): Promise<T> {
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    const message = payload?.detail?.message ?? payload?.message ?? 'Request failed. Check that the backend is running.'
-    throw new Error(message)
-  }
-  return payload as T
-}
-
-export async function preview(expression: string) {
-  const init: RequestInit = {
+export function preview(expression: string) {
+  // The answer always comes from the Python API. A same-origin copy of the
+  // calculator made the page look instant only by calculating in the browser
+  // project, which the assignment does not allow, and its cold start took
+  // several seconds. text/plain avoids a CORS preflight.
+  return request<PreviewResponse>('/api/preview', {
     method: 'POST',
     body: JSON.stringify({ expression }),
-  }
-  // Local development uses the Python API. The public site uses a same-origin
-  // edge route so the answer does not wait on a second connection.
-  if (import.meta.env.DEV) return request<PreviewResponse>('/api/preview', init)
-  let response: Response
-  try {
-    response = await fetch('/api/preview', {
-      ...init,
-      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-    })
-  } catch {
-    return request<PreviewResponse>('/api/preview', init)
-  }
-  if (response.status === 404 || response.status >= 500) {
-    return request<PreviewResponse>('/api/preview', init)
-  }
-  return parseJson<PreviewResponse>(response)
+    cache: 'no-store',
+  })
 }
 
 export function calculate(expression: string) {
