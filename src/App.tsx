@@ -78,6 +78,39 @@ function expressionForDisplay(value: string) {
   return value.replaceAll('*', ' × ').replaceAll('/', ' ÷ ').replaceAll('-', ' − ').replaceAll('+', ' + ')
 }
 
+const HISTORY_CACHE_KEY = 'calcura-history-cache-v1'
+
+function readCachedHistory(): CalculationRecord[] {
+  try {
+    const cached = window.localStorage.getItem(HISTORY_CACHE_KEY)
+    if (!cached) return []
+    const parsed = JSON.parse(cached) as unknown
+    return Array.isArray(parsed) ? parsed as CalculationRecord[] : []
+  } catch {
+    return []
+  }
+}
+
+function writeCachedHistory(items: CalculationRecord[]) {
+  try {
+    window.localStorage.setItem(HISTORY_CACHE_KEY, JSON.stringify(items.slice(0, 200)))
+  } catch {
+    // Local storage is an enhancement for serverless demo reliability.
+  }
+}
+
+function statsFromHistory(items: CalculationRecord[]): StatsResponse {
+  if (!items.length) return { success: true, total: 0, average: null, minimum: null, maximum: null }
+  const values = items.map((item) => item.result)
+  return {
+    success: true,
+    total: values.length,
+    average: values.reduce((sum, value) => sum + value, 0) / values.length,
+    minimum: Math.min(...values),
+    maximum: Math.max(...values),
+  }
+}
+
 function App() {
   const [expression, setExpression] = useState('')
   const [result, setResult] = useState<number | null>(null)
@@ -97,8 +130,15 @@ function App() {
 
   async function refreshData(search = keyword) {
     const [historyResponse, statsResponse] = await Promise.all([getHistory(search), getStats()])
-    setHistory(historyResponse.items)
-    setStats(statsResponse)
+    const cached = readCachedHistory()
+    const backendItems = historyResponse.items
+    const sourceItems = backendItems.length ? backendItems : cached
+    const visibleItems = search
+      ? sourceItems.filter((item) => item.expression.toLowerCase().includes(search.toLowerCase()))
+      : sourceItems
+    setHistory(visibleItems)
+    if (sourceItems.length) writeCachedHistory(sourceItems)
+    setStats(backendItems.length ? statsResponse : statsFromHistory(sourceItems))
   }
 
   async function refreshBackendStatus() {
@@ -112,7 +152,17 @@ function App() {
   }
 
   useEffect(() => {
-    refreshData('').catch(() => setBackendStatus('offline'))
+    const cached = readCachedHistory()
+    if (cached.length) {
+      setHistory(cached)
+      setStats(statsFromHistory(cached))
+    }
+    refreshData('').catch(() => {
+      setBackendStatus('offline')
+      const fallback = readCachedHistory()
+      setHistory(fallback)
+      setStats(statsFromHistory(fallback))
+    })
     void refreshBackendStatus()
     const timer = window.setInterval(() => void refreshBackendStatus(), 8000)
     return () => window.clearInterval(timer)
@@ -172,6 +222,12 @@ function App() {
       setResult(response.result)
       setJustCalculated(true)
       setBackendStatus('online')
+      setHistory((current) => {
+        const next = [response.record, ...current.filter((item) => item.id !== response.record.id)]
+        writeCachedHistory(next)
+        setStats(statsFromHistory(next))
+        return next
+      })
       await refreshData()
     } catch (requestError) {
       setError(requestError instanceof Error ? friendlyError(requestError.message) : 'The calculation could not be completed.')
@@ -208,6 +264,10 @@ function App() {
   async function removeRecord(id: number) {
     try {
       await deleteHistory(id)
+      const next = readCachedHistory().filter((item) => item.id !== id)
+      writeCachedHistory(next)
+      setHistory((current) => current.filter((item) => item.id !== id))
+      setStats(statsFromHistory(next))
       await refreshData()
     } catch (requestError) {
       setError(requestError instanceof Error ? friendlyError(requestError.message) : 'Unable to delete this history item.')
@@ -218,6 +278,9 @@ function App() {
     if (!history.length) return
     try {
       await clearHistory()
+      writeCachedHistory([])
+      setHistory([])
+      setStats(statsFromHistory([]))
       await refreshData()
     } catch (requestError) {
       setError(requestError instanceof Error ? friendlyError(requestError.message) : 'Unable to clear history.')
@@ -317,7 +380,7 @@ function App() {
           <div className="history-list">
             {history.length ? history.map((record) => <div className="history-item" key={record.id}><div className="history-item-main"><div className="history-expression">{expressionForDisplay(record.expression)}</div><div className="history-time"><Clock3 size={12} /> {formatTime(record.created_at)}</div></div><div className="history-item-result">{formatResult(record.result)}</div><button className="delete-button" aria-label={`Delete ${record.expression}`} title="Delete record" onClick={() => void removeRecord(record.id)}><X size={15} /></button></div>) : <div className="empty-state"><ArrowDownLeft size={24} /><strong>No calculations yet</strong><span>Complete your first calculation and it will appear here.</span></div>}
           </div>
-          <div className="history-footer"><span><span className="live-dot" /> Data stored in the backend database</span><span>{history.length} {history.length === 1 ? 'result' : 'results'}</span></div>
+          <div className="history-footer"><span><span className="live-dot" /> Backend history with local session cache</span><span>{history.length} {history.length === 1 ? 'result' : 'results'}</span></div>
         </aside>
       </main>
       <footer className="footer"><span>Calcura · Front-end / Back-end Separation Assignment</span><span>FastAPI · SQLite · React</span></footer>
