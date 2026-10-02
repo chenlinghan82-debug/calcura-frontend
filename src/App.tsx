@@ -196,6 +196,7 @@ function App() {
   const [showConnection, setShowConnection] = useState(false)
   const [notice, setNotice] = useState('')
   const requestSerial = useRef(0)
+  const searchSerial = useRef(0)
   const saveQueue = useRef(Promise.resolve())
   const expressionRef = useRef('')
 
@@ -247,13 +248,17 @@ function App() {
   }, [isDark])
 
   useEffect(() => {
+    const serial = searchSerial.current + 1
+    searchSerial.current = serial
     const timer = window.setTimeout(() => {
       getHistory(keyword)
         .then((response) => {
+          if (serial !== searchSerial.current) return
           setHistory(response.items.map(normalizeRecord))
           setUsingCache(false)
         })
         .catch(() => {
+          if (serial !== searchSerial.current) return
           const cached = readCachedHistory().filter((item) => item.expression.toLowerCase().includes(keyword.toLowerCase()))
           setHistory(cached)
           setUsingCache(true)
