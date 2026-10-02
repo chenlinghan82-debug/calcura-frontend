@@ -18,7 +18,7 @@ import {
   Wifi,
   X,
 } from 'lucide-react'
-import { API_BASE_URL, calculate, checkHealth, clearHistory, deleteHistory, downloadHistory, getHistory, getStats, toggleFavorite } from './services/api'
+import { API_BASE_URL, calculate, clearHistory, deleteHistory, downloadHistory, getHealth, getHistory, getStats, toggleFavorite } from './services/api'
 import type { CalculationRecord, StatsResponse } from './types/api'
 
 const buttons = [
@@ -45,6 +45,11 @@ const buttons = [
 ] as const
 
 const functions = [
+  { label: 'sin', value: 'sin(', aria: 'Sine in degrees' },
+  { label: 'cos', value: 'cos(', aria: 'Cosine in degrees' },
+  { label: 'tan', value: 'tan(', aria: 'Tangent in degrees' },
+  { label: 'ln', value: 'ln(', aria: 'Natural logarithm' },
+  { label: 'log', value: 'log(', aria: 'Base-10 logarithm' },
   { label: '√', value: 'sqrt(', aria: 'Square root' },
   { label: 'x^y', value: '^', aria: 'Power' },
   { label: '%', value: '%', aria: 'Percent' },
@@ -81,11 +86,16 @@ function formatResult(value: number) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 10 }).format(value)
 }
 
+function formatStat(value: number) {
+  if (!Number.isFinite(value)) return 'Unavailable'
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(value)
+}
+
 function formatTime(value: string) {
   const normalizedValue = value.includes('T') && !/[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? `${value}Z` : value
   const date = new Date(normalizedValue)
   if (Number.isNaN(date.getTime())) return 'Unknown time'
-  return new Intl.DateTimeFormat('en-GB', {
+  const parts = new Intl.DateTimeFormat('en-CA', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -93,7 +103,9 @@ function formatTime(value: string) {
     minute: '2-digit',
     second: '2-digit',
     hourCycle: 'h23',
-  }).format(date).replace(',', '')
+  }).formatToParts(date)
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? '00'
+  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}:${part('second')}`
 }
 
 function expressionForDisplay(value: string) {
@@ -101,7 +113,7 @@ function expressionForDisplay(value: string) {
 }
 
 function startsFresh(value: string) {
-  return /^[0-9.(]/.test(value) || value === 'sqrt(' || value === 'abs(' || value === 'pi' || value === 'e' || value === 'Ans'
+  return /^[0-9.(]/.test(value) || value.endsWith('(') || value === 'pi' || value === 'e' || value === 'Ans'
 }
 
 const HISTORY_CACHE_KEY = 'calcura-history-cache-v2'
@@ -156,6 +168,8 @@ function App() {
   const [justCalculated, setJustCalculated] = useState(false)
   const [copied, setCopied] = useState(false)
   const [usingCache, setUsingCache] = useState(false)
+  const [databaseName, setDatabaseName] = useState('checking')
+  const [showConnection, setShowConnection] = useState(false)
 
   const displayValue = result !== null && justCalculated ? formatResult(result) : expression || '0'
   const prettyExpression = expression ? expressionForDisplay(expression) : 'Ready for a calculation'
@@ -172,10 +186,12 @@ function App() {
 
   async function refreshBackendStatus() {
     try {
-      const online = await checkHealth()
-      setBackendStatus(online ? 'online' : 'offline')
+      const health = await getHealth()
+      setBackendStatus(health.status === 'ok' ? 'online' : 'offline')
+      setDatabaseName(health.database ?? 'unknown')
     } catch {
       setBackendStatus('offline')
+      setDatabaseName('unavailable')
     }
   }
 
@@ -219,14 +235,22 @@ function App() {
     setError('')
     setCopied(false)
     setSteps([])
+    let nextValue = value
+    if (value === 'Ans') {
+      if (result === null) {
+        setError('Ans is not available yet. Complete a calculation first.')
+        return
+      }
+      nextValue = plainNumber(result)
+    }
     if (justCalculated) {
-      const nextExpression = startsFresh(value) || result === null ? value : `${plainNumber(result)}${value}`
+      const nextExpression = startsFresh(nextValue) || result === null ? nextValue : `${plainNumber(result)}${nextValue}`
       setExpression(nextExpression)
       setResult(null)
       setJustCalculated(false)
       return
     }
-    setExpression((current) => `${current}${value}`)
+    setExpression((current) => `${current}${nextValue}`)
     setJustCalculated(false)
   }
 
@@ -354,24 +378,35 @@ function App() {
     }
   }
 
-  async function copyResult() {
-    if (result === null) return
-    const text = plainNumber(result)
+  async function copyText(text: string) {
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text)
-      } else {
-        const textarea = document.createElement('textarea')
-        textarea.value = text
-        textarea.setAttribute('readonly', '')
-        textarea.style.position = 'fixed'
-        textarea.style.opacity = '0'
-        document.body.appendChild(textarea)
-        textarea.select()
-        const copiedSuccessfully = document.execCommand('copy')
-        textarea.remove()
-        if (!copiedSuccessfully) throw new Error('Copy command was rejected')
+        return
       }
+    } catch {
+      // Some browsers expose clipboard but reject the write. Fall through.
+    }
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.top = '0'
+    textarea.style.left = '0'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    textarea.setSelectionRange(0, text.length)
+    const copiedSuccessfully = document.execCommand('copy')
+    textarea.remove()
+    if (!copiedSuccessfully) throw new Error('Copy command was rejected')
+  }
+
+  async function copyResult() {
+    if (result === null) return
+    try {
+      await copyText(plainNumber(result))
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1600)
     } catch {
@@ -381,7 +416,7 @@ function App() {
 
   const statsSummary = useMemo(() => {
     if (!stats.total) return 'No statistics yet'
-    return `Average ${formatResult(stats.average ?? 0)} · Range ${formatResult(stats.minimum ?? 0)}–${formatResult(stats.maximum ?? 0)}`
+    return `Average ${formatStat(stats.average ?? 0)} · Range ${formatStat(stats.minimum ?? 0)}–${formatStat(stats.maximum ?? 0)}`
   }, [stats])
 
   const backendStatusLabel = backendStatus === 'checking' ? 'Checking backend' : isOnline ? 'Backend online' : 'Backend offline'
@@ -415,8 +450,25 @@ function App() {
               <h1>Clear calculations, <span>reliable history.</span></h1>
               <p>Expressions are safely parsed by the backend. Every successful result is saved in the database.</p>
             </div>
-            <div className={isOnline ? 'api-badge online' : 'api-badge'} role="status" aria-live="polite"><Wifi size={15} /> {backendStatusLabel.toUpperCase()}</div>
+            <button type="button" className={isOnline ? 'api-badge online' : 'api-badge'} aria-expanded={showConnection} aria-controls="api-connection-panel" onClick={() => setShowConnection((open) => !open)}><Wifi size={15} /> API connection</button>
           </div>
+
+
+          {showConnection && (
+            <section className="connection-panel" id="api-connection-panel">
+              <div className="connection-title"><Wifi size={15} /> API connection</div>
+              <p>This panel shows the live link between this page and the calculation service. Arithmetic still happens only on the backend.</p>
+              <dl>
+                <div><dt>Status</dt><dd>{backendStatusLabel}</dd></div>
+                <div><dt>API address</dt><dd>{API_BASE_URL}</dd></div>
+                <div><dt>Health check</dt><dd>/api/health</dd></div>
+                <div><dt>Calculate</dt><dd>POST /api/calculate</dd></div>
+                <div><dt>History</dt><dd>GET /api/history</dd></div>
+                <div><dt>Database</dt><dd>{databaseName}</dd></div>
+              </dl>
+              <a href={`${API_BASE_URL}/docs`} target="_blank" rel="noreferrer">Open API documentation</a>
+            </section>
+          )}
 
           <div className="display-panel" aria-live="polite">
             <div className="display-meta"><span>{justCalculated ? 'Calculation result' : 'Current expression'}</span><span className="display-hint"><Command size={12} /> Keyboard supported</span></div>
@@ -469,7 +521,7 @@ function App() {
           <div className="history-footer"><span><span className="live-dot" /> {usingCache ? 'Offline cache. Reconnect to load the database.' : 'Saved in the backend database'}</span><span>{history.length} {history.length === 1 ? 'result' : 'results'}</span></div>
         </aside>
       </main>
-      <footer className="footer"><span>Calcura · Front-end / Back-end Separation Assignment</span><span>FastAPI · SQLite · React</span></footer>
+      <footer className="footer"><span>Calcura · Front-end / Back-end Separation Assignment</span><span>FastAPI · {databaseName === 'postgresql' ? 'PostgreSQL' : databaseName === 'sqlite' ? 'SQLite' : 'Database'} · React</span></footer>
     </div>
   )
 }

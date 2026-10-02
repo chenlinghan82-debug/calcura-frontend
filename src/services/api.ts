@@ -61,3 +61,9 @@ export async function checkHealth() {
   const response = await fetch(`${API_BASE_URL}/api/health`)
   return response.ok
 }
+
+export async function getHealth() {
+  const response = await fetch(`${API_BASE_URL}/api/health`)
+  if (!response.ok) throw new Error('The backend health check failed.')
+  return response.json() as Promise<{ success: boolean; status: string; database?: string }>
+}

@@ -96,7 +96,7 @@ button, a { touch-action: manipulation; }
 .dark .docs-link { color: #b9d7f5; background: rgba(255,255,255,.07); }
 .steps { margin: 10px 0 0; padding: 8px 8px 8px 26px; border-radius: 12px; background: rgba(87, 150, 201, .08); color: #5d7894; font: 500 12px/1.7 'DM Mono', monospace; }
 .dark .steps { color: #c5d8ec; background: rgba(120, 176, 230, .08); }
-.function-row { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+.function-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(68px, 1fr)); gap: 8px; margin-top: 16px; }
 .key.function { height: 42px; border-radius: 12px; color: #3f78ab; background: rgba(223, 239, 252, .75); font-size: 14px; }
 .dark .key.function { color: #b7dbff; background: rgba(46, 86, 128, .45); }
 .history-actions { display: flex; gap: 12px; }
@@ -113,4 +113,20 @@ button, a { touch-action: manipulation; }
   .key { min-height: 48px; }
   .topbar-actions { gap: 6px; }
   h1 { font-size: 32px; }
+}
+
+button.api-badge { cursor: pointer; }
+.connection-panel { margin-top: 16px; padding: 16px 18px; border: 1px solid rgba(120, 168, 214, .28); border-radius: 16px; background: rgba(255, 255, 255, .55); }
+.dark .connection-panel { background: rgba(12, 28, 48, .55); border-color: rgba(155, 184, 220, .16); }
+.connection-title { display: flex; align-items: center; gap: 8px; color: #2f6f9d; font-size: 13px; font-weight: 800; }
+.dark .connection-title { color: #b7dbff; }
+.connection-panel p { margin: 8px 0 0; color: #6d8298; font-size: 12px; line-height: 1.55; }
+.connection-panel dl { display: grid; gap: 8px; margin: 12px 0; }
+.connection-panel dl div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.connection-panel dt { color: #7d94ab; font: 600 10px 'DM Mono', monospace; letter-spacing: .08em; text-transform: uppercase; }
+.connection-panel dd { margin: 0; overflow-wrap: anywhere; color: #1d3550; font: 500 12px 'DM Mono', monospace; }
+.dark .connection-panel dd { color: #d5e6f6; }
+.connection-panel a { color: #2f7eb8; font-size: 12px; font-weight: 800; }
+@media (max-width: 560px) {
+  .connection-panel dl div { grid-template-columns: 1fr; gap: 2px; }
 }
