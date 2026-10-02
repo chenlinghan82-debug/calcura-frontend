@@ -22,11 +22,36 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T
 }
 
-export function preview(expression: string) {
-  return request<PreviewResponse>('/api/preview', {
+async function parseJson<T>(response: Response): Promise<T> {
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const message = payload?.detail?.message ?? payload?.message ?? 'Request failed. Check that the backend is running.'
+    throw new Error(message)
+  }
+  return payload as T
+}
+
+export async function preview(expression: string) {
+  const init: RequestInit = {
     method: 'POST',
     body: JSON.stringify({ expression }),
-  })
+  }
+  // Local development uses the Python API. The public site uses a same-origin
+  // edge route so the answer does not wait on a second connection.
+  if (import.meta.env.DEV) return request<PreviewResponse>('/api/preview', init)
+  let response: Response
+  try {
+    response = await fetch('/api/preview', {
+      ...init,
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+    })
+  } catch {
+    return request<PreviewResponse>('/api/preview', init)
+  }
+  if (response.status === 404 || response.status >= 500) {
+    return request<PreviewResponse>('/api/preview', init)
+  }
+  return parseJson<PreviewResponse>(response)
 }
 
 export function calculate(expression: string) {

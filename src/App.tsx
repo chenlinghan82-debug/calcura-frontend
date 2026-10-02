@@ -80,6 +80,12 @@ function Pebble({ className = 'pebble' }: { className?: string }) {
 }
 
 
+function isNetworkError(error: unknown) {
+  if (!(error instanceof Error)) return true
+  const message = error.message.toLowerCase()
+  return message.includes('failed to fetch') || message.includes('networkerror') || message.includes('network') || message.includes('backend is running') || message.includes('request failed')
+}
+
 function friendlyError(message: string) {
   if (message.includes('Division by zero')) return 'Division by zero is not allowed.'
   if (message.includes('Square root')) return 'Square root of a negative number is not allowed.'
@@ -230,6 +236,8 @@ function App() {
       setUsingCache(true)
     })
     void refreshBackendStatus()
+    // Wake the same-origin preview route without saving a history record.
+    void preview('1+1').catch(() => undefined)
     const timer = window.setInterval(() => void refreshBackendStatus(), 15000)
     return () => window.clearInterval(timer)
   }, [])
@@ -303,11 +311,14 @@ function App() {
     if (!value) return
     const serial = requestSerial.current + 1
     requestSerial.current = serial
-    setIsLoading(true)
     setError('')
     setCopied(false)
     setNotice('')
+    const slowTimer = window.setTimeout(() => {
+      if (requestSerial.current === serial) setIsLoading(true)
+    }, 160)
     let previewOk = false
+    let waitingForFallback = false
     try {
       const response = await preview(value)
       if (serial !== requestSerial.current || expressionRef.current.trim() !== value) return
@@ -315,17 +326,24 @@ function App() {
       setSteps(response.steps ?? [])
       setJustCalculated(true)
       setBackendStatus('online')
-      setNotice('Result shown. Saving it to history...')
+      setNotice('Result returned by the backend. Saving history...')
       previewOk = true
     } catch (requestError) {
       if (serial !== requestSerial.current || expressionRef.current.trim() !== value) return
-      setError(requestError instanceof Error ? friendlyError(requestError.message) : 'The calculation could not be completed.')
-      setResult(null)
-      setSteps([])
-      setBackendStatus((current) => current === 'checking' ? 'offline' : current)
+      if (isNetworkError(requestError)) {
+        waitingForFallback = true
+        setIsLoading(true)
+      } else {
+        setError(requestError instanceof Error ? friendlyError(requestError.message) : 'The calculation could not be completed.')
+        setResult(null)
+        setSteps([])
+        setBackendStatus((current) => current === 'checking' ? 'offline' : current)
+      }
     } finally {
-      if (serial === requestSerial.current) setIsLoading(false)
+      window.clearTimeout(slowTimer)
+      if (serial === requestSerial.current && !waitingForFallback) setIsLoading(false)
     }
+    if (!previewOk && !waitingForFallback) return
 
     saveQueue.current = saveQueue.current.then(async () => {
       try {
@@ -340,7 +358,10 @@ function App() {
         }
         setBackendStatus('online')
         setUsingCache(false)
-        if (serial === requestSerial.current) setNotice('')
+        if (serial === requestSerial.current) {
+          setNotice('')
+          setIsLoading(false)
+        }
         try {
           await refreshData('')
         } catch {
@@ -348,8 +369,9 @@ function App() {
         }
       } catch (requestError) {
         if (serial !== requestSerial.current) return
+        setIsLoading(false)
         if (previewOk) {
-          setNotice('Result shown. History could not be saved yet.')
+          setNotice('Result returned by the backend. History could not be saved yet.')
         } else if (expressionRef.current.trim() === value) {
           setError(requestError instanceof Error ? friendlyError(requestError.message) : 'The calculation could not be completed.')
         }
