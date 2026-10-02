@@ -1,6 +1,6 @@
-﻿import type { CalculateResponse, HistoryResponse, StatsResponse } from '../types/api'
+import type { CalculateResponse, FavoriteResponse, HistoryResponse, StatsResponse } from '../types/api'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '')
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '')
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -35,12 +35,29 @@ export function clearHistory() {
   return request<{ success: boolean; deleted_count: number }>('/api/history', { method: 'DELETE' })
 }
 
+export function toggleFavorite(id: number) {
+  return request<FavoriteResponse>(`/api/history/${id}/favorite`, { method: 'POST' })
+}
+
 export function getStats() {
   return request<StatsResponse>('/api/stats')
+}
+
+export async function downloadHistory() {
+  const response = await fetch(`${API_BASE_URL}/api/history/export`)
+  if (!response.ok) throw new Error('The history export could not be downloaded.')
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'calcura-history.csv'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 
 export async function checkHealth() {
   const response = await fetch(`${API_BASE_URL}/api/health`)
   return response.ok
 }
-

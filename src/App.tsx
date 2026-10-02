@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   ArrowDownLeft,
@@ -7,55 +7,77 @@ import {
   Clipboard,
   Clock3,
   Command,
+  Download,
   History,
   Moon,
   Search,
   Sparkles,
+  Star,
   Sun,
   Trash2,
   Wifi,
   X,
 } from 'lucide-react'
-import { calculate, checkHealth, clearHistory, deleteHistory, getHistory, getStats } from './services/api'
+import { API_BASE_URL, calculate, checkHealth, clearHistory, deleteHistory, downloadHistory, getHistory, getStats, toggleFavorite } from './services/api'
 import type { CalculationRecord, StatsResponse } from './types/api'
 
 const buttons = [
-  { label: 'AC', value: 'clear', kind: 'utility' },
-  { label: '⌫', value: 'backspace', kind: 'utility' },
-  { label: '(', value: '(', kind: 'utility' },
-  { label: ')', value: ')', kind: 'utility' },
-  { label: '÷', value: '/', kind: 'operator' },
-  { label: '7', value: '7', kind: 'number' },
-  { label: '8', value: '8', kind: 'number' },
-  { label: '9', value: '9', kind: 'number' },
-  { label: '×', value: '*', kind: 'operator' },
-  { label: '−', value: '-', kind: 'operator' },
-  { label: '4', value: '4', kind: 'number' },
-  { label: '5', value: '5', kind: 'number' },
-  { label: '6', value: '6', kind: 'number' },
-  { label: '+', value: '+', kind: 'operator' },
-  { label: '1', value: '1', kind: 'number' },
-  { label: '2', value: '2', kind: 'number' },
-  { label: '3', value: '3', kind: 'number' },
-  { label: '.', value: '.', kind: 'number' },
-  { label: '0', value: '0', kind: 'number wide' },
-  { label: '=', value: 'equals', kind: 'equals' },
+  { label: 'AC', value: 'clear', kind: 'utility', aria: 'All clear' },
+  { label: 'DEL', value: 'backspace', kind: 'utility', aria: 'Delete' },
+  { label: '(', value: '(', kind: 'utility', aria: 'Left parenthesis' },
+  { label: ')', value: ')', kind: 'utility', aria: 'Right parenthesis' },
+  { label: '÷', value: '/', kind: 'operator', aria: 'Divide' },
+  { label: '7', value: '7', kind: 'number', aria: '7' },
+  { label: '8', value: '8', kind: 'number', aria: '8' },
+  { label: '9', value: '9', kind: 'number', aria: '9' },
+  { label: '×', value: '*', kind: 'operator', aria: 'Multiply' },
+  { label: '−', value: '-', kind: 'operator', aria: 'Subtract' },
+  { label: '4', value: '4', kind: 'number', aria: '4' },
+  { label: '5', value: '5', kind: 'number', aria: '5' },
+  { label: '6', value: '6', kind: 'number', aria: '6' },
+  { label: '+', value: '+', kind: 'operator', aria: 'Add' },
+  { label: '.', value: '.', kind: 'number', aria: 'Decimal point' },
+  { label: '1', value: '1', kind: 'number', aria: '1' },
+  { label: '2', value: '2', kind: 'number', aria: '2' },
+  { label: '3', value: '3', kind: 'number', aria: '3' },
+  { label: '0', value: '0', kind: 'number', aria: '0' },
+  { label: '=', value: 'equals', kind: 'equals', aria: 'Equals' },
+] as const
+
+const functions = [
+  { label: '√', value: 'sqrt(', aria: 'Square root' },
+  { label: 'x^y', value: '^', aria: 'Power' },
+  { label: '%', value: '%', aria: 'Percent' },
+  { label: 'n!', value: '!', aria: 'Factorial' },
+  { label: '|x|', value: 'abs(', aria: 'Absolute value' },
+  { label: 'Ans', value: 'Ans', aria: 'Previous answer' },
+  { label: 'π', value: 'pi', aria: 'Pi' },
+  { label: 'e', value: 'e', aria: 'Euler number' },
 ] as const
 
 type BackendStatus = 'checking' | 'online' | 'offline'
 
 function friendlyError(message: string) {
   if (message.includes('Division by zero')) return 'Division by zero is not allowed.'
-  if (message.includes('Invalid') || message.includes('Expected') || message.includes('Unexpected') || message.includes('Missing')) {
+  if (message.includes('Square root')) return 'Square root of a negative number is not allowed.'
+  if (message.includes('Factorial')) return 'Factorial only accepts integers from 0 to 170.'
+  if (message.includes('Ans is not available')) return 'Ans is not available yet. Complete a calculation first.'
+  if (message.includes('Invalid') || message.includes('Expected') || message.includes('Unexpected') || message.includes('Missing') || message.includes('Unknown')) {
     return 'Invalid expression. Check the numbers, operators, and parentheses.'
   }
-  if (message.includes('Unsupported')) return 'Unsupported character. Use numbers, parentheses, and + - × ÷.'
-  if (message.includes('Failed to fetch') || message.includes('NetworkError')) return 'The backend is unavailable. Start the API and try again.'
+  if (message.includes('Unsupported')) return 'Unsupported character. Use numbers, parentheses, and the calculator functions.'
+  if (message.includes('Failed to fetch') || message.includes('NetworkError')) return 'The backend is unavailable. Check the network and try again.'
   return message || 'The calculation could not be completed.'
 }
 
+function plainNumber(value: number) {
+  if (!Number.isFinite(value)) return ''
+  const text = Object.is(value, -0) ? '0' : value.toFixed(10).replace(/\.?0+$/, '')
+  return text === '-0' ? '0' : text
+}
+
 function formatResult(value: number) {
-  if (!Number.isFinite(value)) return '—'
+  if (!Number.isFinite(value)) return 'Unavailable'
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 10 }).format(value)
 }
 
@@ -63,29 +85,38 @@ function formatTime(value: string) {
   const normalizedValue = value.includes('T') && !/[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? `${value}Z` : value
   const date = new Date(normalizedValue)
   if (Number.isNaN(date.getTime())) return 'Unknown time'
-
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: '2-digit',
+  return new Intl.DateTimeFormat('en-GB', {
     year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-  }).format(date)
+    hourCycle: 'h23',
+  }).format(date).replace(',', '')
 }
 
 function expressionForDisplay(value: string) {
-  return value.replaceAll('*', ' × ').replaceAll('/', ' ÷ ').replaceAll('-', ' − ').replaceAll('+', ' + ')
+  return value.replaceAll('*', ' × ').replaceAll('/', ' ÷ ').replaceAll('+', ' + ').replaceAll('-', ' − ').replaceAll('^', ' ^ ').replace(/\s+/g, ' ').trim()
 }
 
-const HISTORY_CACHE_KEY = 'calcura-history-cache-v1'
+function startsFresh(value: string) {
+  return /^[0-9.(]/.test(value) || value === 'sqrt(' || value === 'abs(' || value === 'pi' || value === 'e' || value === 'Ans'
+}
+
+const HISTORY_CACHE_KEY = 'calcura-history-cache-v2'
+const THEME_KEY = 'calcura-theme'
+
+function normalizeRecord(item: CalculationRecord): CalculationRecord {
+  return { ...item, is_favorite: Boolean(item.is_favorite), steps: Array.isArray(item.steps) ? item.steps : [] }
+}
 
 function readCachedHistory(): CalculationRecord[] {
   try {
     const cached = window.localStorage.getItem(HISTORY_CACHE_KEY)
     if (!cached) return []
     const parsed = JSON.parse(cached) as unknown
-    return Array.isArray(parsed) ? parsed as CalculationRecord[] : []
+    return Array.isArray(parsed) ? parsed.map((item) => normalizeRecord(item as CalculationRecord)) : []
   } catch {
     return []
   }
@@ -93,9 +124,9 @@ function readCachedHistory(): CalculationRecord[] {
 
 function writeCachedHistory(items: CalculationRecord[]) {
   try {
-    window.localStorage.setItem(HISTORY_CACHE_KEY, JSON.stringify(items.slice(0, 200)))
+    window.localStorage.setItem(HISTORY_CACHE_KEY, JSON.stringify(items.slice(0, 200).map(normalizeRecord)))
   } catch {
-    // Local storage is an enhancement for serverless demo reliability.
+    // Cache is only a fallback when the backend cannot be reached.
   }
 }
 
@@ -114,15 +145,17 @@ function statsFromHistory(items: CalculationRecord[]): StatsResponse {
 function App() {
   const [expression, setExpression] = useState('')
   const [result, setResult] = useState<number | null>(null)
+  const [steps, setSteps] = useState<string[]>([])
   const [history, setHistory] = useState<CalculationRecord[]>([])
   const [stats, setStats] = useState<StatsResponse>({ success: true, total: 0, average: null, minimum: null, maximum: null })
   const [keyword, setKeyword] = useState('')
-  const [isDark, setIsDark] = useState(true)
+  const [isDark, setIsDark] = useState(() => window.localStorage.getItem(THEME_KEY) !== 'light')
   const [backendStatus, setBackendStatus] = useState<BackendStatus>('checking')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [justCalculated, setJustCalculated] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [usingCache, setUsingCache] = useState(false)
 
   const displayValue = result !== null && justCalculated ? formatResult(result) : expression || '0'
   const prettyExpression = expression ? expressionForDisplay(expression) : 'Ready for a calculation'
@@ -130,19 +163,14 @@ function App() {
 
   async function refreshData(search = keyword) {
     const [historyResponse, statsResponse] = await Promise.all([getHistory(search), getStats()])
-    const cached = readCachedHistory()
-    const backendItems = historyResponse.items
-    const sourceItems = backendItems.length ? backendItems : cached
-    const visibleItems = search
-      ? sourceItems.filter((item) => item.expression.toLowerCase().includes(search.toLowerCase()))
-      : sourceItems
-    setHistory(visibleItems)
-    if (sourceItems.length) writeCachedHistory(sourceItems)
-    setStats(backendItems.length ? statsResponse : statsFromHistory(sourceItems))
+    const items = historyResponse.items.map(normalizeRecord)
+    setHistory(items)
+    setStats(statsResponse)
+    setUsingCache(false)
+    if (!search) writeCachedHistory(items)
   }
 
   async function refreshBackendStatus() {
-    setBackendStatus('checking')
     try {
       const online = await checkHealth()
       setBackendStatus(online ? 'online' : 'offline')
@@ -156,21 +184,33 @@ function App() {
     if (cached.length) {
       setHistory(cached)
       setStats(statsFromHistory(cached))
+      setUsingCache(true)
     }
     refreshData('').catch(() => {
       setBackendStatus('offline')
-      const fallback = readCachedHistory()
-      setHistory(fallback)
-      setStats(statsFromHistory(fallback))
+      setUsingCache(true)
     })
     void refreshBackendStatus()
-    const timer = window.setInterval(() => void refreshBackendStatus(), 8000)
+    const timer = window.setInterval(() => void refreshBackendStatus(), 15000)
     return () => window.clearInterval(timer)
   }, [])
 
   useEffect(() => {
+    window.localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light')
+  }, [isDark])
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
-      getHistory(keyword).then((response) => setHistory(response.items)).catch(() => undefined)
+      getHistory(keyword)
+        .then((response) => {
+          setHistory(response.items.map(normalizeRecord))
+          setUsingCache(false)
+        })
+        .catch(() => {
+          const cached = readCachedHistory().filter((item) => item.expression.toLowerCase().includes(keyword.toLowerCase()))
+          setHistory(cached)
+          setUsingCache(true)
+        })
     }, 200)
     return () => window.clearTimeout(timer)
   }, [keyword])
@@ -178,16 +218,14 @@ function App() {
   function inputValue(value: string) {
     setError('')
     setCopied(false)
-
+    setSteps([])
     if (justCalculated) {
-      const startsNewExpression = /[0-9.(]/.test(value)
-      const nextExpression = startsNewExpression || result === null ? value : `${result}${value}`
+      const nextExpression = startsFresh(value) || result === null ? value : `${plainNumber(result)}${value}`
       setExpression(nextExpression)
       setResult(null)
       setJustCalculated(false)
       return
     }
-
     setExpression((current) => `${current}${value}`)
     setJustCalculated(false)
   }
@@ -195,6 +233,7 @@ function App() {
   function clear() {
     setExpression('')
     setResult(null)
+    setSteps([])
     setError('')
     setCopied(false)
     setJustCalculated(false)
@@ -207,6 +246,7 @@ function App() {
     }
     setExpression((current) => current.slice(0, -1))
     setResult(null)
+    setSteps([])
     setError('')
     setCopied(false)
   }
@@ -219,19 +259,17 @@ function App() {
     setCopied(false)
     try {
       const response = await calculate(value)
+      const record = normalizeRecord(response.record)
       setResult(response.result)
+      setSteps(response.steps ?? record.steps ?? [])
       setJustCalculated(true)
       setBackendStatus('online')
-      setHistory((current) => {
-        const next = [response.record, ...current.filter((item) => item.id !== response.record.id)]
-        writeCachedHistory(next)
-        setStats(statsFromHistory(next))
-        return next
-      })
-      await refreshData()
+      setUsingCache(false)
+      await refreshData('')
     } catch (requestError) {
       setError(requestError instanceof Error ? friendlyError(requestError.message) : 'The calculation could not be completed.')
       setResult(null)
+      setSteps([])
       setBackendStatus((current) => current === 'checking' ? 'offline' : current)
     } finally {
       setIsLoading(false)
@@ -245,17 +283,31 @@ function App() {
     inputValue(value)
   }
 
+  function reuse(record: CalculationRecord) {
+    setExpression(record.expression)
+    setResult(record.result)
+    setSteps(record.steps ?? [])
+    setJustCalculated(true)
+    setError('')
+    setCopied(false)
+  }
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null
       if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return
-
+      if (event.key === '/') {
+        event.preventDefault()
+        document.getElementById('history-search')?.focus()
+        return
+      }
       if (event.key === 'Enter' || event.key === '=') {
         event.preventDefault()
         void submit()
       } else if (event.key === 'Escape') clear()
       else if (event.key === 'Backspace') backspace()
-      else if (/^[0-9.+\-*/()]$/.test(event.key)) inputValue(event.key)
+      else if (event.key === ' ') inputValue(' ')
+      else if (/^[0-9.+\-*/()^%!a-zA-Z]$/.test(event.key)) inputValue(event.key)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -264,11 +316,7 @@ function App() {
   async function removeRecord(id: number) {
     try {
       await deleteHistory(id)
-      const next = readCachedHistory().filter((item) => item.id !== id)
-      writeCachedHistory(next)
-      setHistory((current) => current.filter((item) => item.id !== id))
-      setStats(statsFromHistory(next))
-      await refreshData()
+      await refreshData('')
     } catch (requestError) {
       setError(requestError instanceof Error ? friendlyError(requestError.message) : 'Unable to delete this history item.')
     }
@@ -281,16 +329,34 @@ function App() {
       writeCachedHistory([])
       setHistory([])
       setStats(statsFromHistory([]))
-      await refreshData()
+      setUsingCache(false)
+      await refreshData('')
     } catch (requestError) {
       setError(requestError instanceof Error ? friendlyError(requestError.message) : 'Unable to clear history.')
     }
   }
 
+  async function markFavorite(id: number) {
+    try {
+      const response = await toggleFavorite(id)
+      const updated = normalizeRecord(response.record)
+      setHistory((current) => current.map((item) => item.id === id ? updated : item))
+    } catch (requestError) {
+      setError(requestError instanceof Error ? friendlyError(requestError.message) : 'Unable to update this favorite.')
+    }
+  }
+
+  async function exportHistory() {
+    try {
+      await downloadHistory()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? friendlyError(requestError.message) : 'Unable to export history.')
+    }
+  }
+
   async function copyResult() {
     if (result === null) return
-    const text = String(result)
-
+    const text = plainNumber(result)
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text)
@@ -309,13 +375,13 @@ function App() {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1600)
     } catch {
-      setError('Copy failed. Please copy the result manually.')
+      setError('Copy failed. Select the result and copy it manually.')
     }
   }
 
   const statsSummary = useMemo(() => {
     if (!stats.total) return 'No statistics yet'
-    return `Average ${formatResult(stats.average ?? 0)} · Range ${formatResult(stats.minimum ?? 0)}—${formatResult(stats.maximum ?? 0)}`
+    return `Average ${formatResult(stats.average ?? 0)} · Range ${formatResult(stats.minimum ?? 0)}–${formatResult(stats.maximum ?? 0)}`
   }, [stats])
 
   const backendStatusLabel = backendStatus === 'checking' ? 'Checking backend' : isOnline ? 'Backend online' : 'Backend offline'
@@ -331,6 +397,7 @@ function App() {
           </div>
         </div>
         <div className="topbar-actions">
+          <a className="docs-link" href={`${API_BASE_URL}/docs`} target="_blank" rel="noreferrer">API docs</a>
           <div className={isOnline ? 'status-chip online' : 'status-chip'} role="status" aria-live="polite" title="Live status of the calculation API">
             <span className="status-dot" /> {backendStatusLabel}
           </div>
@@ -346,7 +413,7 @@ function App() {
           <div className="calculator-heading">
             <div>
               <h1>Clear calculations, <span>reliable history.</span></h1>
-              <p>Expressions are safely parsed by the backend and every result is saved automatically.</p>
+              <p>Expressions are safely parsed by the backend. Every successful result is saved in the database.</p>
             </div>
             <div className={isOnline ? 'api-badge online' : 'api-badge'} role="status" aria-live="polite"><Wifi size={15} /> {backendStatusLabel.toUpperCase()}</div>
           </div>
@@ -355,14 +422,18 @@ function App() {
             <div className="display-meta"><span>{justCalculated ? 'Calculation result' : 'Current expression'}</span><span className="display-hint"><Command size={12} /> Keyboard supported</span></div>
             <div className="display-expression">{prettyExpression}</div>
             <div className={error ? 'display-result error' : 'display-result'}>{error || displayValue}</div>
+            {steps.length > 0 && <ol className="steps" aria-label="Backend calculation steps">{steps.map((step, index) => <li key={`${step}-${index}`}>{step}</li>)}</ol>}
             <div className="display-footer">
-              <span>{isLoading ? 'Calculating with the backend…' : result !== null && justCalculated ? 'Result returned by the backend' : 'Enter an expression, then press Enter'}</span>
+              <span>{isLoading ? 'Calculating with the backend...' : result !== null && justCalculated ? 'Result returned by the backend' : 'Enter an expression, then press Enter'}</span>
               <button className="copy-button" onClick={() => void copyResult()} disabled={result === null} aria-label="Copy result" title={result === null ? 'Calculate a result first' : 'Copy result'}>{copied ? <Check size={14} /> : <Clipboard size={14} />} {copied ? 'Copied' : 'Copy result'}</button>
             </div>
           </div>
 
+          <div className="function-row" role="group" aria-label="Scientific functions">
+            {functions.map((button) => <button key={button.aria} className="key function" onClick={() => handleButton(button.value)} disabled={isLoading} aria-label={button.aria} title={button.aria}>{button.label}</button>)}
+          </div>
           <div className="keypad" role="group" aria-label="Calculator keypad">
-            {buttons.map((button) => <button key={button.value} className={`key ${button.kind}`} onClick={() => handleButton(button.value)} disabled={isLoading} aria-label={button.label === '⌫' ? 'Backspace' : button.label}>{button.label}</button>)}
+            {buttons.map((button) => <button key={button.value} className={`key ${button.kind}`} onClick={() => handleButton(button.value)} disabled={isLoading} aria-label={button.aria}>{button.label}</button>)}
           </div>
           <div className="calculator-note"><Activity size={14} /> The backend performs the calculation; the frontend only displays the result.</div>
         </section>
@@ -370,17 +441,32 @@ function App() {
         <aside className="history-card card-surface">
           <div className="history-heading">
             <div><div className="section-kicker"><History size={14} /> ACTIVITY LOG</div><h2>Calculation history</h2></div>
-            <button className="text-button danger" onClick={() => void removeAll()} disabled={!history.length} aria-label="Clear calculation history"><Trash2 size={14} /> Clear</button>
+            <div className="history-actions">
+              <button className="text-button" onClick={() => void exportHistory()} disabled={!history.length} aria-label="Export calculation history"><Download size={14} /> Export</button>
+              <button className="text-button danger" onClick={() => void removeAll()} disabled={!history.length} aria-label="Clear calculation history"><Trash2 size={14} /> Clear</button>
+            </div>
           </div>
           <div className="stats-row">
             <div className="stat-box"><span>Total calculations</span><strong>{stats.total}</strong></div>
             <div className="stat-box stat-wide"><span>Result overview</span><strong>{statsSummary}</strong></div>
           </div>
-          <label className="search-box"><Search size={16} /><input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="Search expressions…" aria-label="Search calculation history" /><kbd>/</kbd></label>
+          <label className="search-box"><Search size={16} /><input id="history-search" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="Search expressions" aria-label="Search calculation history" /><kbd>/</kbd></label>
           <div className="history-list">
-            {history.length ? history.map((record) => <div className="history-item" key={record.id}><div className="history-item-main"><div className="history-expression">{expressionForDisplay(record.expression)}</div><div className="history-time"><Clock3 size={12} /> {formatTime(record.created_at)}</div></div><div className="history-item-result">{formatResult(record.result)}</div><button className="delete-button" aria-label={`Delete ${record.expression}`} title="Delete record" onClick={() => void removeRecord(record.id)}><X size={15} /></button></div>) : <div className="empty-state"><ArrowDownLeft size={24} /><strong>No calculations yet</strong><span>Complete your first calculation and it will appear here.</span></div>}
+            {history.length ? history.map((record) => (
+              <div className="history-item" key={record.id}>
+                <button className="history-reuse" onClick={() => reuse(record)} title="Load this expression">
+                  <div className="history-item-main">
+                    <div className="history-expression">{expressionForDisplay(record.expression)}</div>
+                    <div className="history-time" title={record.created_at}><Clock3 size={12} /> {formatTime(record.created_at)}</div>
+                  </div>
+                  <div className="history-item-result">{formatResult(record.result)}</div>
+                </button>
+                <button className={record.is_favorite ? 'favorite-button active' : 'favorite-button'} aria-label={record.is_favorite ? `Unfavorite ${record.expression}` : `Favorite ${record.expression}`} title={record.is_favorite ? 'Remove favorite' : 'Mark as favorite'} onClick={() => void markFavorite(record.id)}><Star size={15} /></button>
+                <button className="delete-button" aria-label={`Delete ${record.expression}`} title="Delete record" onClick={() => void removeRecord(record.id)}><X size={15} /></button>
+              </div>
+            )) : <div className="empty-state"><ArrowDownLeft size={24} /><strong>{keyword ? 'No matching calculations' : 'No calculations yet'}</strong><span>{keyword ? 'Try another keyword from an expression.' : 'Complete your first calculation and it will appear here.'}</span></div>}
           </div>
-          <div className="history-footer"><span><span className="live-dot" /> Backend history with local session cache</span><span>{history.length} {history.length === 1 ? 'result' : 'results'}</span></div>
+          <div className="history-footer"><span><span className="live-dot" /> {usingCache ? 'Offline cache. Reconnect to load the database.' : 'Saved in the backend database'}</span><span>{history.length} {history.length === 1 ? 'result' : 'results'}</span></div>
         </aside>
       </main>
       <footer className="footer"><span>Calcura · Front-end / Back-end Separation Assignment</span><span>FastAPI · SQLite · React</span></footer>

@@ -1,4 +1,4 @@
-﻿@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
 
 :root { font-family: 'Manrope', system-ui, sans-serif; color: #18263d; background: #f4f7fb; font-synthesis: none; text-rendering: optimizeLegibility; }
 * { box-sizing: border-box; }
@@ -55,8 +55,7 @@ h1 + p { margin-top: 13px; color: #8293a9; font-size: 13px; }
 .dark .key.utility { color: #a9c7e6; background: rgba(70, 96, 130, .48); }
 .key.operator { color: #4089c8; background: linear-gradient(145deg, #e9f5ff, #d9ecfc); }
 .dark .key.operator { color: #9bd0ff; background: linear-gradient(145deg, rgba(30, 91, 145, .6), rgba(43, 79, 124, .5)); }
-.key.equals { grid-column: span 2; color: #fff; background: linear-gradient(135deg, #277bd6, #56b7ed); box-shadow: 0 12px 23px rgba(42, 132, 217, .25); }
-.key.wide { grid-column: span 2; }
+.key.equals { color: #fff; background: linear-gradient(135deg, #277bd6, #56b7ed); box-shadow: 0 12px 23px rgba(42, 132, 217, .25); }
 .calculator-note { justify-content: center; gap: 7px; margin-top: 21px; color: #91a6ba; font-size: 10px; }
 .history-heading { display: flex; justify-content: space-between; align-items: flex-start; }
 h2 { margin-top: 9px; font-size: 25px; letter-spacing: -.055em; }
@@ -91,3 +90,27 @@ kbd { padding: 2px 5px; border: 1px solid rgba(141,167,192,.27); border-radius: 
 .footer { max-width: 1420px; margin: 0 auto; display: flex; justify-content: space-between; color: #8ca0b4; font: 10px 'DM Mono', monospace; letter-spacing: .03em; }
 @media (max-width: 980px) { .content-grid { grid-template-columns: 1fr; } .calculator-card, .history-card { min-height: auto; } .history-list { min-height: 280px; } }
 @media (max-width: 560px) { .app-shell { padding: 0 16px 18px; } .topbar { height: 72px; } .brand-caption { display: none; } .status-chip { padding: 8px 9px; } .status-chip:not(.online) { font-size: 0; } .calculator-card { padding: 25px 17px 21px; border-radius: 22px; } .history-card { padding: 24px 17px 18px; border-radius: 22px; } .calculator-heading { display: block; } .api-badge { display: inline-flex; margin-top: 17px; } h1 { font-size: 35px; } .display-panel { padding: 18px 16px 14px; } .keypad { gap: 8px; } .key { height: 52px; border-radius: 13px; } .footer { display: block; line-height: 1.8; } }
+
+button, a { touch-action: manipulation; }
+.docs-link { padding: 9px 12px; border-radius: 12px; color: #3d7eb8; background: rgba(255,255,255,.6); border: 1px solid rgba(147,170,195,.2); font-size: 11px; font-weight: 800; text-decoration: none; }
+.dark .docs-link { color: #b9d7f5; background: rgba(255,255,255,.07); }
+.steps { margin: 10px 0 0; padding: 8px 8px 8px 26px; border-radius: 12px; background: rgba(87, 150, 201, .08); color: #5d7894; font: 500 12px/1.7 'DM Mono', monospace; }
+.dark .steps { color: #c5d8ec; background: rgba(120, 176, 230, .08); }
+.function-row { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+.key.function { height: 42px; border-radius: 12px; color: #3f78ab; background: rgba(223, 239, 252, .75); font-size: 14px; }
+.dark .key.function { color: #b7dbff; background: rgba(46, 86, 128, .45); }
+.history-actions { display: flex; gap: 12px; }
+.history-reuse { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; color: inherit; background: transparent; text-align: left; }
+.favorite-button, .delete-button { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: #a8b7c5; background: transparent; }
+.favorite-button.active { color: #d7a441; background: rgba(215, 164, 65, .12); }
+.favorite-button:hover { color: #d7a441; background: rgba(215, 164, 65, .12); }
+.app-shell { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+.display-result, .display-expression { overflow-x: auto; text-overflow: clip; }
+@media (max-width: 560px) {
+  .status-chip:not(.online) { font-size: 10px; }
+  .docs-link { padding: 8px 8px; font-size: 10px; }
+  .function-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .key { min-height: 48px; }
+  .topbar-actions { gap: 6px; }
+  h1 { font-size: 32px; }
+}
