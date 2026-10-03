@@ -199,12 +199,8 @@ function App() {
   const searchSerial = useRef(0)
   const saveQueue = useRef(Promise.resolve())
   const expressionRef = useRef('')
-  const liveRef = useRef<{ expression: string; result: number; steps: string[] } | null>(null)
-  const [live, setLive] = useState<{ expression: string; result: number; steps: string[] } | null>(null)
 
-  const trimmedExpression = expression.trim()
-  const previewReady = !justCalculated && live !== null && live.expression === trimmedExpression
-  const shownNumber = result !== null && justCalculated ? result : previewReady ? live.result : null
+  const shownNumber = result !== null && justCalculated ? result : null
   const displayValue = shownNumber !== null ? formatResult(shownNumber) : expression || '0'
   expressionRef.current = expression
   const prettyExpression = expression ? expressionForDisplay(expression) : 'Ready for a calculation'
@@ -242,12 +238,10 @@ function App() {
       setUsingCache(true)
     })
     void refreshBackendStatus()
-    // Keep the API process and its HTTPS connection warm.
-    // Preview does not write history. Without this, the first equals after
-    // a pause waits several seconds for a cold start.
+    // Keep the API process and its HTTPS connection warm without
+    // evaluating an expression or creating calculation history.
     const warm = () => {
       if (document.visibilityState !== 'visible') return
-      void preview('1+1').catch(() => undefined)
       void refreshBackendStatus()
     }
     warm()
@@ -262,31 +256,6 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light')
   }, [isDark])
-
-  useEffect(() => {
-    const value = expression.trim()
-    if (!value || justCalculated) return
-    let active = true
-    if (liveRef.current?.expression !== value) {
-      liveRef.current = null
-      setLive(null)
-      setSteps([])
-    }
-    const timer = window.setTimeout(() => {
-      void preview(value).then((response) => {
-        if (!active || expressionRef.current.trim() !== value) return
-        const next = { expression: value, result: response.result, steps: response.steps ?? [] }
-        liveRef.current = next
-        setLive(next)
-        setSteps(next.steps)
-        setBackendStatus('online')
-      }).catch(() => undefined)
-    }, 30)
-    return () => {
-      active = false
-      window.clearTimeout(timer)
-    }
-  }, [expression, justCalculated])
 
   useEffect(() => {
     const serial = searchSerial.current + 1
@@ -395,17 +364,6 @@ function App() {
     setError('')
     setCopied(false)
     setNotice('')
-    const ready = liveRef.current
-    if (ready && ready.expression === value) {
-      setResult(ready.result)
-      setSteps(ready.steps)
-      setJustCalculated(true)
-      setBackendStatus('online')
-      setNotice('Result returned by the backend. Saving history...')
-      setIsLoading(false)
-      queueSave(value, serial, true)
-      return
-    }
     const slowTimer = window.setTimeout(() => {
       if (requestSerial.current === serial) setIsLoading(true)
     }, 160)
@@ -617,7 +575,7 @@ function App() {
             <div className={error ? 'display-result error' : 'display-result'}>{error || displayValue}</div>
             {steps.length > 0 && <ol className="steps" aria-label="Backend calculation steps">{steps.map((step, index) => <li key={`${step}-${index}`}>{step}</li>)}</ol>}
             <div className="display-footer">
-              <span>{isLoading ? 'Calculating with the backend...' : notice ? notice : result !== null && justCalculated ? 'Result returned by the backend' : previewReady ? 'Backend preview is ready. Press equals to save it.' : 'Enter an expression, then press Enter'}</span>
+              <span>{isLoading ? 'Calculating with the backend...' : notice ? notice : result !== null && justCalculated ? 'Result returned by the backend' : 'Enter an expression, then press = or Enter'}</span>
               <button className="copy-button" onClick={() => void copyResult()} disabled={shownNumber === null} aria-label="Copy result" title={shownNumber === null ? 'Calculate a result first' : 'Copy result'}>{copied ? <Check size={14} /> : <Clipboard size={14} />} {copied ? 'Copied' : 'Copy result'}</button>
             </div>
           </div>
@@ -628,7 +586,7 @@ function App() {
           <div className="keypad" role="group" aria-label="Calculator keypad">
             {buttons.map((button) => <button key={button.value} className={`key ${button.kind}`} onClick={() => handleButton(button.value)} aria-label={button.aria}>{button.label}</button>)}
           </div>
-          <div className="calculator-note"><Activity size={14} /> The backend performs the calculation. This page only displays it, then saves the history.</div>
+          <div className="calculator-note"><Activity size={14} /> The backend calculates only after you press = or Enter. A successful result is then saved to history.</div>
         </section>
 
         <aside className="history-card card-surface">
